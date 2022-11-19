@@ -1,0 +1,144 @@
+---
+title: "Stats Research Final"
+author: "Cameron Flores"
+date: "11/28/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(qwraps2)
+library(knitr)
+library(ggplot2)
+library(productplots)
+library(brms)
+library(bayesplot)
+library(RSNNS)
+library(caret)
+library(FNN)
+## read data set
+scores <- data.frame(readr::read_csv(file = "school_scores.csv"))
+```
+
+As an example of what we would do we will plot what we would do using the CORGIS Dataset, a similar dataset, which contains state average education assessment and state family income totals. Note that we don't plan to compare our results to this dataset, we plan to collect this sort of data on an individual level. We are also writing an AI model instead of simply plotting the averages of our observations so that we can test our understanding and see if we can consistently predict assessment scores from income. The structure of the AI will also differ from what will be used in practice as the hyperparmeters have been tuned to accommodate for the relatively small amount of observations (577).
+
+First we format the data (calculating densities instead of GPA and income totals)
+For the sake of simplicity we are grouping letter grades and are only taking note of categories indicating test takers
+```{r}
+scores$GPA_A <- (scores$GPA.A.minus.Test.takers + scores$GPA.A.plus.Test.takers + scores$GPA.A.Test.takers)/scores$Total.Test.takers
+
+scores$GPA_B <- scores$GPA.B.Test.takers/scores$Total.Test.takers
+
+scores$GPA_C <- scores$GPA.C.Test.takers/scores$Total.Test.takers
+
+scores$GPA_D <- scores$GPA.D.or.lower.Test.takers/scores$Total.Test.takers
+
+scores$GPA_NA <- scores$GPA.No.response.Test.takers/scores$Total.Test.takers
+
+scores$income_20.40k <- scores$Family.Income.Between.20.40k.Test.takers/scores$Total.Test.takers
+
+scores$income_40.60k <- scores$Family.Income.Between.40.60k.Test.takers/scores$Total.Test.takers
+
+scores$income_60.80k <- scores$Family.Income.Between.60.80k.Test.takers/scores$Total.Test.takers
+
+scores$income_80.100k <- scores$Family.Income.Between.80.100k.Test.takers/scores$Total.Test.takers
+
+scores$income_less.20k <- scores$Family.Income.Less.than.20k.Test.takers/scores$Total.Test.takers
+
+scores$income_more.100k <- scores$Family.Income.More.than.100k.Test.takers/scores$Total.Test.takers
+
+scores <- scores %>% select("GPA_A","GPA_B","GPA_C","GPA_D","income_20.40k","income_40.60k","income_60.80k","income_80.100k","income_less.20k","income_more.100k")
+
+set.seed(123)
+smp_size <- floor(0.90 * nrow(scores))
+
+train_ind <- sample(seq_len(nrow(scores)), size = smp_size)
+
+train <- scores[train_ind, ]
+
+train_x <- train %>% select("income_20.40k","income_40.60k","income_60.80k","income_80.100k","income_less.20k","income_more.100k")
+train_y <- train %>% select("GPA_A","GPA_B","GPA_C","GPA_D")
+
+test <- scores[-train_ind, ]
+test_x <- test %>% select("income_20.40k","income_40.60k","income_60.80k","income_80.100k","income_less.20k","income_more.100k")
+test_y <- test %>% select("GPA_A","GPA_B","GPA_C","GPA_D")
+```
+
+Then we train our neural network model to predict average GPA densities given family incomes densities
+
+```{r size = "footnotesize", warning = FALSE, message = FALSE}
+model <- mlp(train_x, 
+             train_y, 
+             size = c(5, 3), 
+             initFunc = "Randomize_Weights",
+             initFuncParams = c(-0.3, 0.3),
+             learnFuncParams=c(0.1, 0),
+             learnFunc = "Rprop",
+             maxit = 100)
+```
+
+```{r size = "footnotesize", warning = FALSE, message = FALSE}
+
+pred <- stats::predict(model, newdata = test_x)
+pred <- as.data.frame(pred)
+
+mlp_sum <- (test_y$GPA_A - pred$V1)^2 +
+       (test_y$GPA_B - pred$V2)^2 +
+       (test_y$GPA_C - pred$V3)^2 +
+       (test_y$GPA_D - pred$V4)^2 
+  
+mlp_MSE <- mean(mlp_sum)
+mlp_MSE
+
+```
+
+As we can see, our mean squared error value is very close to 0 meaning our error is very low and our model is very accurate. This generally means we can trust what the model says. Given this we then plot our results on a series of scatter plots (Different Income Densities vs GPA)
+
+```{r size = "footnotesize", warning = FALSE, message = FALSE}
+plot(x = test_x$income_20.40k, y = pred$V1,
+     xlab='Proportion of Family Income between $20-40k in the state',
+     ylab='Predicted % of A students',
+     main='Family Income ($20-40k) vs. GPA (A)',
+     abline(lm(pred$V1 ~ test_x$income_20.40k), col = "blue"))
+
+```
+```{r size = "footnotesize", warning = FALSE, message = FALSE}
+plot(x = test_x$income_20.40k, y = pred$V2,
+     xlab='Proportion of Family Income between $20-40k in the state',
+     ylab='Predicted % of B students',
+     main='Family Income ($20-40k) vs. GPA (B)',
+     abline(lm(pred$V2 ~ test_x$income_20.40k), col = "blue"))
+
+```
+```{r size = "footnotesize", warning = FALSE, message = FALSE}
+plot(x = test_x$income_less.20k, y = pred$V1,
+     xlab='Proportion of Family Income less than $20k in the state',
+     ylab='Predicted % of A students',
+     main='Family Income (<$20k) vs. GPA (A)',
+     abline(lm(pred$V1 ~ test_x$income_less.20k), col = "blue"))
+
+```
+
+```{r size = "footnotesize", warning = FALSE, message = FALSE}
+plot(x = test_x$income_less.20k, y = pred$V2,
+     xlab='Proportion of Family Income less than $20k in the state',
+     ylab='Predicted % of B students',
+     main='Family Income (<$20k) vs. GPA (B)',
+     abline(lm(pred$V2 ~ test_x$income_less.20k), col = "blue"))
+
+```
+
+Point out what we need to look for in these graphs
+
+
+```{r size = "footnotesize", warning = FALSE, message = FALSE}
+library(pwr)
+
+pwr.t.test(n=3000, d=NULL, sig.level=0.05, power=0.8, type="two.sample", alternative="two.sided")
+
+
+```
